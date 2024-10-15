@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="recognition_web">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>recognition_web</title>
+  <link rel="manifest" href="manifest.json">
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+  <!-- Quagga.js para lectura de códigos de barras -->
+  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+  <!-- ZXing para lectura de códigos de barras -->
+  <!--  <script src="https://unpkg.com/@zxing/library@latest"></script> -->
+  <script>
+        async function detectFacesWithTensorFlowJS(base64Image) {
+              const img = new Image();
+              img.src = base64Image;
+              await img.decode();
+              const model = await blazeface.load();
+              const predictions = await model.estimateFaces(img, false);
+              if (predictions.length === 0) {
+                return "No se detectaron rostros";
+              }
+              let result = `Se detectaron ${predictions.length} rostro(s):\n`;
+              predictions.forEach((prediction, index) => {
+                result += `Rostro ${index + 1}:\n`;
+                result += `Posición: (${prediction.topLeft[0].toFixed(2)}, ${prediction.topLeft[1].toFixed(2)})\n`;
+                result += `Tamaño: ${(prediction.bottomRight[0] - prediction.topLeft[0]).toFixed(2)} x ${(prediction.bottomRight[1] - prediction.topLeft[1]).toFixed(2)}\n`;
+
+                // Landmarks
+                if (prediction.landmarks && prediction.landmarks.length > 0) {
+                  result += `Landmarks:\n`;
+                  prediction.landmarks.forEach((landmark, i) => {
+                    result += `  - Punto ${i + 1}: (${landmark[0].toFixed(2)}, ${landmark[1].toFixed(2)})\n`;
+                  });
+
+                  // Calcular distancia entre ojos si hay al menos dos landmarks
+                  if (prediction.landmarks.length >= 2) {
+                    const leftEye = prediction.landmarks[0];
+                    const rightEye = prediction.landmarks[1];
+                    const eyeDistance = Math.sqrt(Math.pow(rightEye[0] - leftEye[0], 2) + Math.pow(rightEye[1] - leftEye[1], 2));
+                    result += `Distancia entre ojos: ${eyeDistance.toFixed(2)}\n`;
+                  }
+                }
+
+                result += '\n';
+              });
+              return result;
+            }
+
+      // Exponer la función detectBarcodeWithQuagga en el objeto window
+        window.detectBarcodeWithQuagga = function(base64Image) {
+          return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.src = base64Image;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              canvas.width = img.width;
+              canvas.height = img.height;
+
+              // Aplica un filtro de mejora
+              ctx.filter = 'contrast(1.4) brightness(1.1) saturate(1.2)';
+              ctx.drawImage(img, 0, 0, img.width, img.height);
+
+              const enhancedBase64 = canvas.toDataURL('image/jpeg', 0.95);
+
+              const attempts = [
+                { size: 800, numOfWorkers: 0 },
+                { size: 1600, numOfWorkers: 1, filter: 'contrast(1.3) brightness(1.2)' },
+                { size: 2400, numOfWorkers: 2, filter: 'contrast(1.5) brightness(1.3) saturate(1.1)' },
+                // Agrega más configuraciones si es necesario
+              ];
+
+              function tryDetection(index) {
+                if (index >= attempts.length) {
+                  reject('No se pudo detectar el código de barras después de múltiples intentos');
+                  return;
+                }
+
+                const config = attempts[index];
+
+                Quagga.decodeSingle({
+                  src: enhancedBase64,
+                  numOfWorkers: config.numOfWorkers,
+                  inputStream: { size: config.size },
+                  decoder: {
+                    readers: [
+                      "ean_reader", "ean_8_reader", "code_128_reader", "code_39_reader",
+                      "code_39_vin_reader", "codabar_reader", "upc_reader", "upc_e_reader",
+                      "i2of5_reader", "2of5_reader", "code_93_reader"
+                    ]
+                  },
+                  locate: true,
+                  singleChannel: false
+                }, (result) => {
+                  if (result && result.codeResult) {
+                    console.log(`Código de barras detectado: ${result.codeResult.code}`);
+                    resolve(result.codeResult.code);
+                  } else {
+                    console.log(`Intento ${index + 1} fallido, intentando con la siguiente configuración...`);
+                    tryDetection(index + 1);
+                  }
+                });
+              }
+
+              tryDetection(0);
+            };
+            img.onerror = () => {
+              reject('Error al cargar la imagen');
+            };
+          });
+        };
+    </script>
+</head>
+<body>
+<!-- Mueve los scripts de Flutter hacia el final del body -->
+<script src="flutter.js" defer></script>
+<script src="flutter_bootstrap.js"></script>
+</body>
+</html>
